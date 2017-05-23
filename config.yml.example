@@ -1,0 +1,18 @@
+target: "https://www.cmr.cl/web/cmr-falabella/home"
+username: 
+password:
+structure:
+  elements:
+    description: '.tarjetaDescr'
+    login_form: 'loginpass'
+    movements: 'no facturados'
+    logout: 'LogOff'
+  fields:
+    rut: 'NUMDOC'
+    digit: 'DV'
+    pass: 'PINSEG'
+  mappings:
+    nombre_tarjeta: '.nombreTarjeta'
+    cupo_compras: '.MontoUtilizado'
+    cupo_utilizado: '.totaldelMes'
+    cupo_disponible: '.pagoMinimo'
