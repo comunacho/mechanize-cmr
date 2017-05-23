@@ -5,4 +5,4 @@ gem 'guard-rspec', require: false
 gem 'coveralls', require: false
 gem 'mechanize'
 gem 'terminal-table'
-gem 'money'
+gem 'recursive-open-struct'

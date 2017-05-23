@@ -1,20 +1,22 @@
+$: << '.'
 require 'mechanize'
 require 'terminal-table'
 require 'ostruct'
 require 'recursive-open-struct'
 require 'pry'
 require 'logger'
-
-class Integer
-  def monetize(num, sep = '.', symbol = '$')
-    symbol + num.to_s.reverse.scan(/\d{1,3}/).join(sep).reverse
-  end
-end
+require 'lib/monetize'
 
 module CMR
   class Scraper
 
     LOGGER = Logger.new(STDOUT)
+
+    class << self
+      def print_summary(config_file)
+        Scraper.new(config_file).print_summary
+      end
+    end
 
     attr_accessor :config
 
@@ -29,18 +31,16 @@ module CMR
 
     def parse_url
 
-      LOGGER.info "Initializing agent"
+      LOGGER.info 'Initializing agent'
 
       agent = Mechanize.new
       parsed_table = {}
       description = Hash.new { |h,k| h[k] = {} }
 
-      LOGGER.info "Agent initialized"
-
       agent.get(config.target) do |page|
         structure = config.structure
 
-        LOGGER.info "Login starting"
+        LOGGER.info 'Authentication starting'
 
         login_form = page.form_with(id: structure.elements.login_form)
         rut_parts = config.username.gsub(/\./, '').split('-')
@@ -53,16 +53,17 @@ module CMR
 
         agent.submit(login_form)
 
-        LOGGER.info "Parsing summary"
+        LOGGER.info 'Parsing summary'
         element_description = agent.page.search(structure.elements.description)
 
         config.structure.mappings.to_h.each do |k,v|
           text = element_description.search(v).text
+
           if text.index '$'
-            value = text.split("$").map(&:strip)
+            value = text.split('$').map(&:strip)
             description[k] = OpenStruct.new(
               :name => value[0].gsub(/[^\w\s]*/, '').strip,
-              :value => value[1].gsub(/\./, '')
+              :value => value[1].gsub(/\./, '').to_i
             )
           else
             value = text.strip.lines.map(&:strip)
@@ -73,25 +74,17 @@ module CMR
           end
         end
 
-        binding.pry
-
-        puts Terminal::Table.new(
-          :title => "Resumen",
-          :headings => description.values.map(&:name),
-          :rows => [ description.values.map { |e| e.value.is_a?(Integer) ? e.value.monetize : e.value } ]
-        )
-
-        LOGGER.info "Navigating to movements"
+        LOGGER.info 'Navigating to movements'
         agent.page.link_with(text: /#{structure.elements.movements}/).click
 
         table = agent.page.search('#table-sorter')
         parsed_table = parse_table table
 
-        LOGGER.info "Loging out"
+        LOGGER.info 'Closing session'
         agent.page.link_with(href: /#{structure.elements.logout}/).click
       end
 
-      parsed_table
+      OpenStruct.new(:description => description, :movements => parsed_table)
     end
 
     def parse_table(data)
@@ -101,34 +94,41 @@ module CMR
       headers = headers[0..-2]
 
       data.xpath("//tr")[1..-1].map do |tr|
-        row = []
-        binding.pry
         date = tr.search(".fecha").text
-        descr = tr.search(".descripcion span").text.gsub(/\s{2,}/, ' ')
+        descr = tr.search(".descripcion .detalle-tabla .title").text.gsub(/\s{2,}/, ' ')
+        if tr.search('.descripcion .pendiente').size > 0 then descr << ' (*)' end
         value = tr.search(".valor-compra").text.gsub(/[\$\.]/, '').to_i
-        row << tr.search(".cuotas").text.gsub(/[\$\.]/, '').to_i
-        row << tr.search(".valor-cuota").text.gsub(/[\$\.]/, '').to_i
-        row << tr.search(".puntos").text.gsub(/[\$\.]/, '').to_i
-        rows << [date, descr, value]
+        payments = tr.search(".cuotas").text.gsub(/[\$\.]/, '').to_i
+        val_payments = tr.search(".valor-cuota").text.gsub(/[\$\.]/, '').to_i
+        points = tr.search(".puntos").text.gsub(/[\$\.]/, '').to_i
+        rows << [date, descr, value.monetize, payments, val_payments.monetize, points]
       end
       [ headers, rows ]
     end
 
     def print_summary
-      puts summary
-    end
+      parsed_url = parse_url
+      description = parsed_url.description
 
-    def summary
-      headers, rows = parse_url
-
-      Terminal::Table.new(
-        :title => "Movimientos",
-        :headings => headers,
-        :rows => rows
+      movims = Terminal::Table.new(
+        :title => 'Movimientos',
+        :headings => parsed_url.movements[0],
+        :rows => parsed_url.movements[1]
       )
+
+      resumen = Terminal::Table.new do |t|
+        t.title = 'Resumen'
+        t << description.values.map(&:name)
+        t << description.values.map { |e|
+          e.value.is_a?(Numeric) ? e.value.monetize : e.value
+        }
+      end
+
+      puts resumen
+      puts movims
+
     end
   end
 end
 
-p = CMR::Scraper.new ARGV[0]
-p.print_summary
+CMR::Scraper.print_summary(ARGV[0])
